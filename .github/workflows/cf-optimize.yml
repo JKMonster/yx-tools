@@ -8,14 +8,20 @@ jobs:
   update:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+      
+      - name: 安装Python依赖
+        run: pip install requests
+        
       - name: 下载CloudflareST
         run: |
           wget -q https://github.com/XIU2/CloudflareSpeedTest/releases/latest/download/CloudflareSpeedTest_linux_amd64.tar.gz
           tar -xzf CloudflareSpeedTest_linux_amd64.tar.gz
           
-      - name: 运行测速
+      - name: 下载IP列表并测速
         run: |
-          ./cfst -n 5 -t 5 -dn 5 -dt 2 -tl 500
+          wget -q https://raw.githubusercontent.com/XIU2/CloudflareSpeedTest/master/ip.txt -O cfip.txt
+          ./cfst -f cfip.txt -n 5 -t 5 -dn 5 -dt 0 -tl 3000
           cat result.csv
           
       - name: 更新DNS
@@ -24,8 +30,12 @@ jobs:
           ZID: ${{ secrets.CF_ZONE_ID }}
           DOM: ${{ secrets.CF_DOMAIN }}
         run: |
-          IP=$(awk -F',' 'NR==2{print$1}' result.csv)
+          IP=$(awk -F',' 'NR==2{print$1}' result.csv 2>/dev/null || echo "")
+          if [ -z "$IP" ]; then
+            echo "未获取到IP，跳过"
+            exit 0
+          fi
           echo "Best IP: $IP"
           RID=$(curl -s "https://api.cloudflare.com/client/v4/zones/$ZID/dns_records?type=A&name=$DOM" -H "Authorization: Bearer $CF_TOKEN" | python3 -c "import sys,json;print(json.load(sys.stdin)['result'][0]['id'])")
           curl -s -X PUT "https://api.cloudflare.com/client/v4/zones/$ZID/dns_records/$RID" -H "Authorization: Bearer $CF_TOKEN" -H "Content-Type: application/json" --data "{\"type\":\"A\",\"name\":\"$DOM\",\"content\":\"$IP\",\"ttl\":1,\"proxied\":false}"
-          echo "Updated to $IP"
+          echo "DNS已更新为: $IP"
