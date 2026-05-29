@@ -14,11 +14,25 @@ jobs:
           ZID: ${{ secrets.CF_ZONE_ID }}
           DOM: ${{ secrets.CF_DOMAIN }}
         run: |
-          # 已知优选IP列表（电信/移动）
           IPS=("172.64.52.124" "162.159.58.65" "104.25.246.239")
-          # 随机选一个
           IP=${IPS[$RANDOM % ${#IPS[@]}]}
           echo "选择IP: $IP"
-          RID=$(curl -s "https://api.cloudflare.com/client/v4/zones/$ZID/dns_records?type=A&name=$DOM" -H "Authorization: Bearer $CF_TOKEN" | python3 -c "import sys,json;print(json.load(sys.stdin)['result'][0]['id'])")
-          curl -s -X PUT "https://api.cloudflare.com/client/v4/zones/$ZID/dns_records/$RID" -H "Authorization: Bearer $CF_TOKEN" -H "Content-Type: application/json" --data "{\"type\":\"A\",\"name\":\"$DOM\",\"content\":\"$IP\",\"ttl\":1,\"proxied\":false}"
-          echo "DNS已更新为: $IP"
+          
+          # 获取所有A记录
+          RESULT=$(curl -s "https://api.cloudflare.com/client/v4/zones/$ZID/dns_records?type=A&name=$DOM" -H "Authorization: Bearer $CF_TOKEN")
+          echo "API返回: $RESULT"
+          
+          # 检查是否有记录
+          COUNT=$(echo "$RESULT" | python3 -c "import sys,json;print(len(json.load(sys.stdin).get('result',[])))")
+          echo "找到 $COUNT 条A记录"
+          
+          if [ "$COUNT" -gt "0" ]; then
+            # 更新现有记录
+            RID=$(echo "$RESULT" | python3 -c "import sys,json;print(json.load(sys.stdin)['result'][0]['id'])")
+            curl -s -X PUT "https://api.cloudflare.com/client/v4/zones/$ZID/dns_records/$RID" -H "Authorization: Bearer $CF_TOKEN" -H "Content-Type: application/json" --data "{\"type\":\"A\",\"name\":\"$DOM\",\"content\":\"$IP\",\"ttl\":1,\"proxied\":false}"
+            echo "已更新: $IP"
+          else
+            # 创建新记录
+            curl -s -X POST "https://api.cloudflare.com/client/v4/zones/$ZID/dns_records" -H "Authorization: Bearer $CF_TOKEN" -H "Content-Type: application/json" --data "{\"type\":\"A\",\"name\":\"$DOM\",\"content\":\"$IP\",\"ttl\":1,\"proxied\":false}"
+            echo "已创建: $IP"
+          fi
